@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 import warnings
 from dataclasses import dataclass
@@ -13,13 +14,29 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
+PARTIAL_WARNING_MESSAGE = (
+    "functools\\.partial will be a method descriptor in future "
+    "Python versions; wrap it in enum\\.member\\(\\) if you want "
+    "to preserve the old behavior"
+)
+PARTIAL_WARNING_ENV_FILTER = (
+    "ignore:functools.partial will be a method descriptor in future "
+    "Python versions; wrap it in enum.member() if you want to preserve "
+    "the old behavior:FutureWarning"
+)
+
+existing_warning_filters = os.environ.get("PYTHONWARNINGS")
+if existing_warning_filters:
+    if PARTIAL_WARNING_ENV_FILTER not in existing_warning_filters:
+        os.environ["PYTHONWARNINGS"] = (
+            f"{existing_warning_filters},{PARTIAL_WARNING_ENV_FILTER}"
+        )
+else:
+    os.environ["PYTHONWARNINGS"] = PARTIAL_WARNING_ENV_FILTER
+
 warnings.filterwarnings(
     "ignore",
-    message=(
-        "functools\\.partial will be a method descriptor in future "
-        "Python versions; wrap it in enum\\.member\\(\\) if you want "
-        "to preserve the old behavior"
-    ),
+    message=PARTIAL_WARNING_MESSAGE,
     category=FutureWarning,
 )
 
@@ -30,10 +47,10 @@ if str(ROOT / "src") not in sys.path:
 sq = importlib.import_module("squidpy")
 
 
-DEFAULT_N_PERMS = (100, 250, 500)
+DEFAULT_N_PERMS = (250, 500, 1000)
 DEFAULT_N_JOBS = (1, 2, 8)
 CLUSTER_KEY = "leiden"
-DEFAULT_SCENARIOS = ("large", "more_clusters")
+DEFAULT_SCENARIOS = ("cells_10k", "cells_40k", "cells_80k", "cells_120k")
 
 
 @dataclass(frozen=True)
@@ -43,6 +60,8 @@ class ScenarioConfig:
     n_genes: int
     interaction_genes: int
     split_clusters: bool = False
+    target_n_cells: int | None = None
+    cluster_repeat_groups: int | None = None
 
 
 SCENARIOS = (
@@ -78,6 +97,42 @@ SCENARIOS = (
         interaction_genes=32,
         split_clusters=True,
     ),
+    ScenarioConfig(
+        name="cells_10k",
+        cell_repeats=1,
+        n_genes=48,
+        interaction_genes=48,
+        target_n_cells=10_000,
+        split_clusters=True,
+        cluster_repeat_groups=4,
+    ),
+    ScenarioConfig(
+        name="cells_40k",
+        cell_repeats=1,
+        n_genes=48,
+        interaction_genes=48,
+        target_n_cells=40_000,
+        split_clusters=True,
+        cluster_repeat_groups=12,
+    ),
+    ScenarioConfig(
+        name="cells_80k",
+        cell_repeats=1,
+        n_genes=48,
+        interaction_genes=48,
+        target_n_cells=80_000,
+        split_clusters=True,
+        cluster_repeat_groups=16,
+    ),
+    ScenarioConfig(
+        name="cells_120k",
+        cell_repeats=1,
+        n_genes=48,
+        interaction_genes=48,
+        target_n_cells=120_000,
+        split_clusters=True,
+        cluster_repeat_groups=20,
+    ),
 )
 
 
@@ -110,12 +165,20 @@ def prepare_scenario(
             f"`{config.name}` has more interaction genes than available genes."
         )
 
+    repeats = config.cell_repeats
+    if config.target_n_cells is not None:
+        repeats = max(1, (config.target_n_cells + base.n_obs - 1) // base.n_obs)
+
     adata = repeat_adata(
         base[:, : config.n_genes].copy(),
-        repeats=config.cell_repeats,
+        repeats=repeats,
     )
     if config.split_clusters:
         repeated = adata.obs["_repeat_id"].astype("string")
+        if config.cluster_repeat_groups is not None:
+            repeated = (
+                adata.obs["_repeat_id"].astype(int) % config.cluster_repeat_groups
+            ).astype("string")
         clusters = adata.obs[CLUSTER_KEY].astype("string")
         adata.obs[CLUSTER_KEY] = (clusters + "_" + repeated).astype("category")
     else:
