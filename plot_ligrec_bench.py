@@ -92,6 +92,34 @@ def confirm_overwrite(paths: list[Path], assume_yes: bool) -> None:
         raise SystemExit(0)
 
 
+def get_line_columns(df: pd.DataFrame) -> list[str]:
+    line_columns = ["label"]
+    if "n_perms" in df.columns and df["n_perms"].nunique() > 1:
+        line_columns.append("n_perms")
+    elif "n_genes" in df.columns and df["n_genes"].nunique() > 1:
+        line_columns.append("n_genes")
+
+    if "source_csv" in df.columns and df["source_csv"].nunique() > 1:
+        line_columns.append("source_csv")
+    return line_columns
+
+
+def format_line_label(key: tuple[object, ...], columns: list[str]) -> str:
+    label_parts: list[str] = []
+    for value, column in zip(key, columns, strict=False):
+        if column == "label":
+            label_parts.append(f"label={value}")
+        elif column == "n_perms":
+            label_parts.append(f"n_perms={value}")
+        elif column == "n_genes":
+            label_parts.append(f"n_genes={value}")
+        elif column == "source_csv":
+            label_parts.append(f"csv={value}")
+        else:
+            label_parts.append(f"{column}={value}")
+    return ", ".join(label_parts)
+
+
 def label_lines_in_place(ax: plt.Axes, *, fontsize: int = 9) -> None:
     lines = [line for line in ax.get_lines() if len(line.get_xdata())]
     if not lines:
@@ -141,24 +169,12 @@ def plot_scenario(
 ) -> None:
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    line_columns = ["label", "n_perms"]
-    if (
-        "source_csv" in scenario_df.columns
-        and scenario_df["source_csv"].nunique() > 1
-    ):
-        line_columns.append("source_csv")
+    line_columns = get_line_columns(scenario_df)
 
     for key, group in scenario_df.groupby(line_columns, sort=True):
         if not isinstance(key, tuple):
             key = (key,)
-        label_parts = [
-            f"label={value}"
-            for value in key[:1]
-        ]
-        label_parts.append(f"n_perms={key[1]}")
-        if len(key) > 2:
-            label_parts.append(f"csv={key[2]}")
-        line_label = ", ".join(label_parts)
+        line_label = format_line_label(key, line_columns)
         group = group.sort_values("n_jobs")
         ax.plot(
             group["n_jobs"],
@@ -203,23 +219,18 @@ def plot_overview(
 
     for ax, scenario in zip(axes_flat, scenarios, strict=False):
         scenario_df = df[df["scenario"] == scenario].copy()
-        line_columns = ["label", "n_perms"]
-        if scenario_df["source_csv"].nunique() > 1:
-            line_columns.append("source_csv")
+        line_columns = get_line_columns(scenario_df)
 
         for key, group in scenario_df.groupby(line_columns, sort=True):
             if not isinstance(key, tuple):
                 key = (key,)
-            label_parts = [str(key[0]), f"{key[1]} perms"]
-            if len(key) > 2:
-                label_parts.append(key[2])
             group = group.sort_values("n_jobs")
             ax.plot(
                 group["n_jobs"],
                 group[metric],
                 marker="o",
                 linewidth=2,
-                label=" | ".join(label_parts),
+                label=format_line_label(key, line_columns),
             )
 
         ax.set_title(scenario)
